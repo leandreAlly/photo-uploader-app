@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photo Uploader</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; padding: 2rem 1.25rem;
+      font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 1100px; margin-inline: auto;
+    }
+    header { border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: 1rem; margin-bottom: 1.75rem; }
+    h1 { margin: 0 0 .2rem; font-size: 1.5rem; letter-spacing: -.01em; }
+    .sub { opacity: .65; font-size: .875rem; }
+    form {
+      display: grid; gap: .75rem; margin-bottom: 2rem; padding: 1.25rem;
+      border: 1px solid rgba(128,128,128,.3); border-radius: 10px;
+      grid-template-columns: 1fr auto;
+    }
+    form input[type=text] {
+      grid-column: 1 / -1; padding: .6rem .7rem; font: inherit;
+      border: 1px solid rgba(128,128,128,.4); border-radius: 7px; background: transparent; color: inherit;
+    }
+    button {
+      padding: .6rem 1.1rem; font: inherit; font-weight: 600; cursor: pointer;
+      border: 0; border-radius: 7px; background: #2563eb; color: #fff;
+    }
+    .error { color: #dc2626; font-size: .875rem; }
+    .grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+    figure { margin: 0; border: 1px solid rgba(128,128,128,.3); border-radius: 10px; overflow: hidden; }
+    figure img { display: block; width: 100%; height: 190px; object-fit: cover; background: rgba(128,128,128,.15); }
+    figcaption { padding: .7rem .8rem; font-size: .875rem; }
+    .empty { opacity: .6; padding: 2.5rem 0; text-align: center; }
+    footer { margin-top: 2.5rem; font-size: .8rem; opacity: .55; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Photo Uploader</h1>
+    <p class="sub">Leandre Tuyambaze &middot; images in S3 behind CloudFront, descriptions in RDS PostgreSQL</p>
+  </header>
+
+  <form method="post" action="/upload" enctype="multipart/form-data">
+    <input type="text" name="description" placeholder="Describe this photo" required maxlength="1000">
+    <input type="file" name="file" accept="image/*" required>
+    <button type="submit">Upload</button>
+    <p class="error" th:if="${error}" th:text="${error}"></p>
+  </form>
+
+  <div class="grid" th:if="${!photos.isEmpty()}">
+    <figure th:each="photo : ${photos}">
+      <img th:src="${photo.url()}" th:alt="${photo.description()}" loading="lazy">
+      <figcaption th:text="${photo.description()}"></figcaption>
+    </figure>
+  </div>
+  <p class="empty" th:if="${photos.isEmpty()}">No photos yet - upload the first one.</p>
+
+  <footer><span th:text="'version ' + ${version}"></span></footer>
+</body>
+</html>
