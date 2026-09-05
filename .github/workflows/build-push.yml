@@ -1,0 +1,169 @@
+name: Build and push to ECR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Test, build and push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # The registry variables are needed on every run. The rest describe the
+      # platform and delivery stacks, which do not exist until an image is in
+      # ECR, so they are only required once the artifact bucket is there.
+      - name: Check the registry configuration is complete
+        env:
+          AWS_REGION_V: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY_V: ${{ vars.ECR_REPOSITORY }}
+          AWS_ECR_ROLE_ARN_V: ${{ vars.AWS_ECR_ROLE_ARN }}
+        run: |
+          set -eo pipefail
+          missing=()
+          for v in AWS_REGION ECR_REPOSITORY AWS_ECR_ROLE_ARN; do
+            eval "value=\${${v}_V}"
+            [ -n "$value" ] || missing+=("$v")
+          done
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository variables: ${missing[*]}"
+            exit 1
+          fi
+          echo "Registry configuration is complete"
+
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Run the test suite
+        run: mvn -B test
+
+      - name: Assume the ECR push role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_ROLE_ARN }}
+          role-session-name: gha-ecr-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build the image
+        id: image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -eo pipefail
+          TAG="${GITHUB_SHA::7}"
+          IMAGE="$REGISTRY/${{ vars.ECR_REPOSITORY }}:$TAG"
+
+          if aws ecr describe-images \
+               --repository-name "${{ vars.ECR_REPOSITORY }}" \
+               --image-ids "imageTag=$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image $TAG already exists - tags are immutable, nothing to do"
+            exit 0
+          fi
+
+          docker build \
+            --build-arg "VERSION=$TAG" \
+            --build-arg "COMMIT=$GITHUB_SHA" \
+            --build-arg "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --tag "$IMAGE" \
+            .
+
+          {
+            echo "exists=false"
+            echo "uri=$IMAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the deployment config
+        if: steps.image.outputs.exists == 'false'
+        env:
+          ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+          TASK_FAMILY_V: ${{ vars.TASK_FAMILY }}
+          TASK_EXEC_ROLE_ARN_V: ${{ vars.TASK_EXEC_ROLE_ARN }}
+          TASK_ROLE_ARN_V: ${{ vars.TASK_ROLE_ARN }}
+          LOG_GROUP_V: ${{ vars.LOG_GROUP }}
+          DB_URL_V: ${{ vars.DB_URL }}
+          DB_SECRET_ARN_V: ${{ vars.DB_SECRET_ARN }}
+          IMAGE_BUCKET_V: ${{ vars.IMAGE_BUCKET }}
+          IMAGE_PREFIX_V: ${{ vars.IMAGE_PREFIX }}
+          CDN_DOMAIN_V: ${{ vars.CDN_DOMAIN }}
+        run: |
+          set -eo pipefail
+
+          # First deploy of a fresh account: the delivery stack is gated behind
+          # an image existing, so on this run there is no bucket to publish to
+          # and no pipeline to trigger. Push the image and let the next run
+          # deliver it.
+          if [ -z "$ARTIFACT_BUCKET" ] || ! aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
+            echo "::notice::Artifact bucket not present yet - bootstrap run, skipping config publish"
+            exit 0
+          fi
+
+          missing=()
+          for v in TASK_FAMILY TASK_EXEC_ROLE_ARN TASK_ROLE_ARN LOG_GROUP \
+                   DB_URL DB_SECRET_ARN IMAGE_BUCKET IMAGE_PREFIX CDN_DOMAIN; do
+            eval "value=\${${v}_V}"
+            [ -n "$value" ] || missing+=("$v")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository variables: ${missing[*]}"
+            exit 1
+          fi
+
+          mkdir -p build
+
+          sed -e "s|<TASK_FAMILY>|${{ vars.TASK_FAMILY }}|" \
+              -e "s|<EXECUTION_ROLE_ARN>|${{ vars.TASK_EXEC_ROLE_ARN }}|" \
+              -e "s|<TASK_ROLE_ARN>|${{ vars.TASK_ROLE_ARN }}|" \
+              -e "s|<LOG_GROUP>|${{ vars.LOG_GROUP }}|" \
+              -e "s|<AWS_REGION>|${{ vars.AWS_REGION }}|" \
+              -e "s|<DB_URL>|${{ vars.DB_URL }}|" \
+              -e "s|<DB_SECRET_ARN>|${{ vars.DB_SECRET_ARN }}|g" \
+              -e "s|<IMAGE_BUCKET>|${{ vars.IMAGE_BUCKET }}|" \
+              -e "s|<IMAGE_PREFIX>|${{ vars.IMAGE_PREFIX }}|" \
+              -e "s|<CDN_DOMAIN>|${{ vars.CDN_DOMAIN }}|" \
+              -e "s|<IMAGE>|${{ steps.image.outputs.uri }}|" \
+              taskdef.json > build/taskdef.json
+
+          if grep -q '<[A-Z_]*>' build/taskdef.json; then
+            echo "::error::Unsubstituted placeholders remain in taskdef.json:"
+            grep -o '<[A-Z_]*>' build/taskdef.json | sort -u
+            exit 1
+          fi
+          jq empty build/taskdef.json
+
+          cp appspec.yaml build/appspec.yaml
+          (cd build && zip -q app.zip taskdef.json appspec.yaml)
+
+          aws s3 cp build/app.zip "s3://$ARTIFACT_BUCKET/config/app.zip"
+          echo "Published deployment config for ${{ steps.image.outputs.uri }}"
+
+      - name: Push the image
+        if: steps.image.outputs.exists == 'false'
+        run: |
+          set -eo pipefail
+          docker push "${{ steps.image.outputs.uri }}"
+          echo "Pushed ${{ steps.image.outputs.uri }} - EventBridge will start the pipeline"
