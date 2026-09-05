@@ -1,0 +1,44 @@
+{
+  "family": "<TASK_FAMILY>",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<TASK_ROLE_ARN>",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "<IMAGE>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "SPRING_DATASOURCE_URL", "value": "<DB_URL>" },
+        { "name": "APP_IMAGE_BUCKET", "value": "<IMAGE_BUCKET>" },
+        { "name": "APP_IMAGE_PREFIX", "value": "<IMAGE_PREFIX>" },
+        { "name": "APP_CDN_DOMAIN", "value": "<CDN_DOMAIN>" }
+      ],
+      "secrets": [
+        { "name": "SPRING_DATASOURCE_USERNAME", "valueFrom": "<DB_SECRET_ARN>:username::" },
+        { "name": "SPRING_DATASOURCE_PASSWORD", "valueFrom": "<DB_SECRET_ARN>:password::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "<LOG_GROUP>",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "app"
+        }
+      }
+    }
+  ]
+}
