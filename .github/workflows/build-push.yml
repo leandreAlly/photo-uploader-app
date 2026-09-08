@@ -116,9 +116,13 @@ jobs:
           # First deploy of a fresh account: the delivery stack is gated behind
           # an image existing, so on this run there is no bucket to publish to
           # and no pipeline to trigger. Push the image and let the next run
-          # deliver it.
-          if [ -z "$ARTIFACT_BUCKET" ] || ! aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
-            echo "::notice::Artifact bucket not present yet - bootstrap run, skipping config publish"
+          # deliver it. The variable is the signal - it is set from a delivery
+          # output, so it is empty exactly when the bucket does not exist. Do
+          # not probe with head-bucket: that needs s3:ListBucket, which this
+          # role is deliberately not granted, so it fails closed and skips the
+          # publish on every run.
+          if [ -z "$ARTIFACT_BUCKET" ]; then
+            echo "::notice::Artifact bucket not configured yet - bootstrap run, skipping config publish"
             exit 0
           fi
 
