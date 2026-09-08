@@ -1,6 +1,7 @@
 package com.leandre.photouploader;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.IOException;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -75,6 +77,29 @@ class PhotoControllerTest {
                 .andExpect(redirectedUrl("/"));
 
         Mockito.verify(photos).save(any(Photo.class));
+    }
+
+    @Test
+    void storageFailureRedirectsInsteadOfReturningAnErrorPage() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "cat.jpg", "image/jpeg", "bytes".getBytes());
+
+        willThrow(new IOException("s3 unavailable")).given(storage).store(any());
+
+        mockMvc.perform(multipart("/upload").file(file).param("description", "a cat"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/"));
+
+        Mockito.verifyNoInteractions(photos);
+    }
+
+    @Test
+    void oversizeErrorIsShownOnTheGallery() throws Exception {
+        given(photos.findAllByOrderByCreatedAtDesc()).willReturn(List.of());
+
+        mockMvc.perform(get("/").param("error", "too-large"))
+                .andExpect(status().isOk())
+                .andExpect(model().attributeExists("error"));
     }
 
     @Test

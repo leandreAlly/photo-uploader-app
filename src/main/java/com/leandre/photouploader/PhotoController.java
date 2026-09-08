@@ -7,10 +7,12 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
@@ -37,7 +39,14 @@ public class PhotoController {
     }
 
     @GetMapping("/")
-    public String gallery(Model model) {
+    public String gallery(
+            @RequestParam(name = "error", required = false) String error,
+            Model model) {
+
+        if ("too-large".equals(error)) {
+            model.addAttribute("error", "That image is too large - the limit is 10MB.");
+        }
+
         List<PhotoView> view = photos.findAllByOrderByCreatedAtDesc().stream()
                 .map(photo -> new PhotoView(storage.urlFor(photo.getObjectKey()), photo.getDescription()))
                 .toList();
@@ -51,16 +60,29 @@ public class PhotoController {
     public String upload(
             @RequestParam("file") MultipartFile file,
             @RequestParam("description") String description,
-            RedirectAttributes redirect) throws IOException {
+            RedirectAttributes redirect) {
 
         if (file.isEmpty()) {
             redirect.addFlashAttribute("error", "Choose an image to upload.");
             return "redirect:/";
         }
 
-        String key = storage.store(file);
-        photos.save(new Photo(key, description));
+        try {
+            String key = storage.store(file);
+            photos.save(new Photo(key, description));
+        } catch (IOException e) {
+            redirect.addFlashAttribute("error", "Upload failed - please try again.");
+        }
         return "redirect:/";
+    }
+
+    /**
+     * Thrown by the multipart resolver before the upload method is reached, so
+     * it cannot be handled inline - without this the user gets a raw 500 page.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public String uploadTooLarge() {
+        return "redirect:/?error=too-large";
     }
 
     /** Target of the ALB health check - must stay cheap and must not touch S3. */
