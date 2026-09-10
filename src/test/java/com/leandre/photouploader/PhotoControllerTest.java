@@ -15,6 +15,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.mock.web.MockMultipartFile;
@@ -94,6 +95,22 @@ class PhotoControllerTest {
     }
 
     @Test
+    void databaseFailureCleansUpTheUploadedObject() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "cat.jpg", "image/jpeg", "bytes".getBytes());
+
+        given(storage.store(any())).willReturn("images/generated.jpg");
+        willThrow(new DataIntegrityViolationException("database unavailable"))
+                .given(photos).save(any(Photo.class));
+
+        mockMvc.perform(multipart("/upload").file(file).param("description", "a cat"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/"));
+
+        Mockito.verify(storage).delete("images/generated.jpg");
+    }
+
+    @Test
     void oversizeErrorIsShownOnTheGallery() throws Exception {
         given(photos.findAllByOrderByCreatedAtDesc()).willReturn(List.of());
 
@@ -111,5 +128,18 @@ class PhotoControllerTest {
                 .andExpect(redirectedUrl("/"));
 
         Mockito.verifyNoInteractions(storage);
+    }
+
+    @Test
+    void blankDescriptionIsRejectedWithoutTouchingStorage() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "cat.jpg", "image/jpeg", "bytes".getBytes());
+
+        mockMvc.perform(multipart("/upload").file(file).param("description", "   "))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/"));
+
+        Mockito.verifyNoInteractions(storage);
+        Mockito.verifyNoInteractions(photos);
     }
 }
