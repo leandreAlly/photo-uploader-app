@@ -55,7 +55,7 @@ class StorageServiceTest {
 
         assertThatThrownBy(() -> storage.store(file))
                 .isInstanceOf(IOException.class)
-                .hasMessage("unsupported image format");
+                .hasMessage("unsupported image format!");
 
         verifyNoInteractions(s3);
     }
