@@ -25,6 +25,8 @@ public class StorageService {
     private final String prefix;
     private final String cdnDomain;
 
+    // push for new image build
+
     public StorageService(
             S3Client s3,
             @Value("${app.image.bucket}") String bucket,
@@ -44,7 +46,7 @@ public class StorageService {
         byte[] content = file.getBytes();
         ImageType imageType = ImageType.detect(content);
         if (imageType == null) {
-            throw new IOException("unsupported image format");
+            throw new IOException("unsupported image format!");
         }
 
         String key = prefix + UUID.randomUUID() + imageType.extension();
