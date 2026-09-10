@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_SHA::7}"
-          IMAGE="$REGISTRY/${{ vars.ECR_REPOSITORY }}:sha-$GITHUB_SHA"
+          IMAGE="$REGISTRY/${{ vars.ECR_REPOSITORY }}:latest"
 
           docker build \
             --build-arg "VERSION=$VERSION" \
