@@ -48,11 +48,12 @@ jobs:
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          SHA="${GITHUB_SHA::7}"
-          IMAGE="$REGISTRY/${{ vars.ECR_REPOSITORY }}:latest"
+          set -euo pipefail
+          VERSION="${GITHUB_SHA::7}"
+          IMAGE="$REGISTRY/${{ vars.ECR_REPOSITORY }}:sha-$GITHUB_SHA"
 
           docker build \
-            --build-arg "VERSION=$SHA" \
+            --build-arg "VERSION=$VERSION" \
             --build-arg "COMMIT=$GITHUB_SHA" \
             --build-arg "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --tag "$IMAGE" \
@@ -61,21 +62,60 @@ jobs:
           echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Publish the deployment config
+        env:
+          ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+          TASK_FAMILY: ${{ vars.TASK_FAMILY }}
+          TASK_EXEC_ROLE_ARN: ${{ vars.TASK_EXEC_ROLE_ARN }}
+          TASK_ROLE_ARN: ${{ vars.TASK_ROLE_ARN }}
+          LOG_GROUP: ${{ vars.LOG_GROUP }}
+          AWS_REGION_VALUE: ${{ vars.AWS_REGION }}
+          DB_URL: ${{ vars.DB_URL }}
+          DB_SECRET_ARN: ${{ vars.DB_SECRET_ARN }}
+          IMAGE_BUCKET: ${{ vars.IMAGE_BUCKET }}
+          IMAGE_PREFIX: ${{ vars.IMAGE_PREFIX }}
+          CDN_DOMAIN: ${{ vars.CDN_DOMAIN }}
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$ARTIFACT_BUCKET" ]; then
+            echo "::notice::Artifact bucket is not configured; publishing the bootstrap image only"
+            exit 0
+          fi
+
+          required=(TASK_FAMILY TASK_EXEC_ROLE_ARN TASK_ROLE_ARN LOG_GROUP \
+                    AWS_REGION_VALUE DB_URL DB_SECRET_ARN IMAGE_BUCKET \
+                    IMAGE_PREFIX CDN_DOMAIN)
+          missing=()
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing deployment variables: ${missing[*]}"
+            exit 1
+          fi
+
           mkdir -p build
 
-          sed -e "s|<TASK_FAMILY>|${{ vars.TASK_FAMILY }}|" \
-              -e "s|<EXECUTION_ROLE_ARN>|${{ vars.TASK_EXEC_ROLE_ARN }}|" \
-              -e "s|<TASK_ROLE_ARN>|${{ vars.TASK_ROLE_ARN }}|" \
-              -e "s|<LOG_GROUP>|${{ vars.LOG_GROUP }}|" \
-              -e "s|<AWS_REGION>|${{ vars.AWS_REGION }}|" \
-              -e "s|<DB_URL>|${{ vars.DB_URL }}|" \
-              -e "s|<DB_SECRET_ARN>|${{ vars.DB_SECRET_ARN }}|g" \
-              -e "s|<IMAGE_BUCKET>|${{ vars.IMAGE_BUCKET }}|" \
-              -e "s|<IMAGE_PREFIX>|${{ vars.IMAGE_PREFIX }}|" \
-              -e "s|<CDN_DOMAIN>|${{ vars.CDN_DOMAIN }}|" \
-              -e "s|<IMAGE>|${{ steps.image.outputs.uri }}|" \
+          sed -e "s|<TASK_FAMILY>|$TASK_FAMILY|" \
+              -e "s|<EXECUTION_ROLE_ARN>|$TASK_EXEC_ROLE_ARN|" \
+              -e "s|<TASK_ROLE_ARN>|$TASK_ROLE_ARN|" \
+              -e "s|<LOG_GROUP>|$LOG_GROUP|" \
+              -e "s|<AWS_REGION>|$AWS_REGION_VALUE|" \
+              -e "s|<DB_URL>|$DB_URL|" \
+              -e "s|<DB_SECRET_ARN>|$DB_SECRET_ARN|g" \
+              -e "s|<IMAGE_BUCKET>|$IMAGE_BUCKET|" \
+              -e "s|<IMAGE_PREFIX>|$IMAGE_PREFIX|" \
+              -e "s|<CDN_DOMAIN>|$CDN_DOMAIN|" \
+              -e "s|<IMAGE>|$IMAGE_URI|" \
               taskdef.json > build/taskdef.json
+
+          if grep -Eq '<[A-Z_]+>' build/taskdef.json; then
+            echo "::error::Unsubstituted placeholders remain in taskdef.json"
+            exit 1
+          fi
 
           jq empty build/taskdef.json
 
@@ -86,4 +126,5 @@ jobs:
 
       - name: Push the image
         run: |
+          set -euo pipefail
           docker push "${{ steps.image.outputs.uri }}"
