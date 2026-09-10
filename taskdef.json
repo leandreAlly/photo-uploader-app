@@ -15,12 +15,20 @@
       "name": "app",
       "image": "<IMAGE>",
       "essential": true,
+      "stopTimeout": 30,
       "portMappings": [
         {
           "containerPort": 8080,
           "protocol": "tcp"
         }
       ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"],
+        "interval": 30,
+        "timeout": 3,
+        "retries": 3,
+        "startPeriod": 40
+      },
       "environment": [
         { "name": "SPRING_DATASOURCE_URL", "value": "<DB_URL>" },
         { "name": "APP_IMAGE_BUCKET", "value": "<IMAGE_BUCKET>" },
