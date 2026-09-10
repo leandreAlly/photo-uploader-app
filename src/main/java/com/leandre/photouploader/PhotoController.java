@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,8 +19,12 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import software.amazon.awssdk.core.exception.SdkException;
+
 @Controller
 public class PhotoController {
+
+    private static final Logger log = LoggerFactory.getLogger(PhotoController.class);
 
     private final PhotoRepository photos;
     private final StorageService storage;
@@ -67,10 +74,25 @@ public class PhotoController {
             return "redirect:/";
         }
 
+        String normalizedDescription = description == null ? "" : description.trim();
+        if (normalizedDescription.isBlank() || normalizedDescription.length() > 1000) {
+            redirect.addFlashAttribute("error", "Description must contain 1 to 1000 characters.");
+            return "redirect:/";
+        }
+
+        String objectKey = null;
         try {
-            String key = storage.store(file);
-            photos.save(new Photo(key, description));
-        } catch (IOException e) {
+            objectKey = storage.store(file);
+            photos.save(new Photo(objectKey, normalizedDescription));
+        } catch (IOException | SdkException | DataAccessException e) {
+            if (objectKey != null) {
+                try {
+                    storage.delete(objectKey);
+                } catch (SdkException cleanupFailure) {
+                    log.error("Failed to clean up S3 object after upload failure: {}", objectKey, cleanupFailure);
+                }
+            }
+            log.warn("Photo upload failed", e);
             redirect.addFlashAttribute("error", "Upload failed - please try again.");
         }
         return "redirect:/";

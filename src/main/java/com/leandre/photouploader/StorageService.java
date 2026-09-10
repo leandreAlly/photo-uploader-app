@@ -1,7 +1,6 @@
 package com.leandre.photouploader;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
@@ -37,30 +37,97 @@ public class StorageService {
     }
 
     public String store(MultipartFile file) throws IOException {
-        String key = prefix + UUID.randomUUID() + extensionOf(file.getOriginalFilename());
+        if (file.getSize() <= 0 || file.getSize() > 10L * 1024 * 1024) {
+            throw new IOException("image size is outside the allowed range");
+        }
+
+        byte[] content = file.getBytes();
+        ImageType imageType = ImageType.detect(content);
+        if (imageType == null) {
+            throw new IOException("unsupported image format");
+        }
+
+        String key = prefix + UUID.randomUUID() + imageType.extension();
 
         PutObjectRequest request = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(key)
-                .contentType(file.getContentType())
+                .contentType(imageType.contentType())
+                .contentDisposition("inline")
                 .build();
 
-        s3.putObject(request, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+        s3.putObject(request, RequestBody.fromBytes(content));
         return key;
+    }
+
+    public void delete(String objectKey) {
+        s3.deleteObject(DeleteObjectRequest.builder()
+                .bucket(bucket)
+                .key(objectKey)
+                .build());
     }
 
     public String urlFor(String objectKey) {
         return "https://" + cdnDomain + "/" + objectKey;
     }
 
-    private static String extensionOf(String filename) {
-        if (filename == null) {
-            return "";
+    private enum ImageType {
+        JPEG(".jpg", "image/jpeg"),
+        PNG(".png", "image/png"),
+        GIF(".gif", "image/gif"),
+        WEBP(".webp", "image/webp");
+
+        private final String extension;
+        private final String contentType;
+
+        ImageType(String extension, String contentType) {
+            this.extension = extension;
+            this.contentType = contentType;
         }
-        int dot = filename.lastIndexOf('.');
-        if (dot < 0 || dot == filename.length() - 1) {
-            return "";
+
+        String extension() {
+            return extension;
         }
-        return filename.substring(dot).toLowerCase(Locale.ROOT);
+
+        String contentType() {
+            return contentType;
+        }
+
+        static ImageType detect(byte[] content) {
+            if (content.length >= 3
+                    && (content[0] & 0xff) == 0xff
+                    && (content[1] & 0xff) == 0xd8
+                    && (content[2] & 0xff) == 0xff) {
+                return JPEG;
+            }
+            if (content.length >= 8
+                    && (content[0] & 0xff) == 0x89
+                    && content[1] == 'P'
+                    && content[2] == 'N'
+                    && content[3] == 'G'
+                    && (content[4] & 0xff) == 0x0d
+                    && (content[5] & 0xff) == 0x0a
+                    && (content[6] & 0xff) == 0x1a
+                    && (content[7] & 0xff) == 0x0a) {
+                return PNG;
+            }
+            if (content.length >= 6
+                    && ((content[0] == 'G' && content[1] == 'I' && content[2] == 'F')
+                    && (content[3] == '8' && (content[4] == '7' || content[4] == '9') && content[5] == 'a'))) {
+                return GIF;
+            }
+            if (content.length >= 12
+                    && content[0] == 'R'
+                    && content[1] == 'I'
+                    && content[2] == 'F'
+                    && content[3] == 'F'
+                    && content[8] == 'W'
+                    && content[9] == 'E'
+                    && content[10] == 'B'
+                    && content[11] == 'P') {
+                return WEBP;
+            }
+            return null;
+        }
     }
 }
