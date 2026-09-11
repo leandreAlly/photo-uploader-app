@@ -15,6 +15,7 @@ public class S3Config {
      */
     @Bean
     S3Client s3Client() {
+        // Initiate s3 client
         return S3Client.create();
     }
 }
