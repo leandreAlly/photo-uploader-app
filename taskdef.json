@@ -30,7 +30,7 @@
         "startPeriod": 40
       },
       "environment": [
-        { "name": "SPRING_DATASOURCE_URL", "value": "<DB_URL>" },
+        { "name": "SPRING_DATASOURCE_URL", "value": "<DB_URL>?sslmode=require" },
         { "name": "APP_IMAGE_BUCKET", "value": "<IMAGE_BUCKET>" },
         { "name": "APP_IMAGE_PREFIX", "value": "<IMAGE_PREFIX>" },
         { "name": "APP_CDN_DOMAIN", "value": "<CDN_DOMAIN>" }
