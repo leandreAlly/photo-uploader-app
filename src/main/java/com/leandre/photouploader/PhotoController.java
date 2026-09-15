@@ -4,10 +4,10 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -98,10 +98,7 @@ public class PhotoController {
         return "redirect:/";
     }
 
-    /**
-     * Thrown by the multipart resolver before the upload method is reached, so
-     * it cannot be handled inline - without this the user gets a raw 500 page.
-     */
+
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public String uploadTooLarge() {
         return "redirect:/?error=too-large";

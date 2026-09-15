@@ -9,10 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/**
- * Metadata for one uploaded image. The bytes live in S3; this row only records
- * where they went and what the uploader said about them.
- */
+
 @Entity
 @Table(name = "photos")
 public class Photo {

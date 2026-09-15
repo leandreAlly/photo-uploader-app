@@ -12,11 +12,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-/**
- * Writes uploads to the private S3 bucket and turns an object key into the
- * CloudFront URL a browser can actually fetch. The bucket itself is not
- * readable - only the distribution's origin access control can read it.
- */
 @Service
 public class StorageService {
 
