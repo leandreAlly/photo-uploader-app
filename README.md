@@ -26,14 +26,68 @@ image that runs as a non-root user.
 
 ## How a request flows
 
-An upload is written straight to S3 under the configured prefix with a random
-UUID key, and only the key plus the description are persisted. Nothing streams
-image bytes back through the application: the gallery renders
-`https://<cdn domain>/<object key>`, and the browser fetches it from CloudFront.
+The two paths are deliberately asymmetric. Uploads pass through the
+application; reads do not. Image bytes are never served by the container - the
+gallery page only carries CloudFront URLs, and the browser fetches the pictures
+itself.
 
-The bucket blocks all public access. Only the distribution's Origin Access
-Control can read it, so an object URL works through the CDN and returns `403`
-directly from S3.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Browser
+    participant ALB as Application<br/>Load Balancer
+    participant App as ECS Fargate task<br/>Spring Boot
+    participant S3 as S3 image bucket<br/>private, OAC only
+    participant DB as RDS PostgreSQL
+    participant CF as CloudFront
+
+    rect rgb(255, 247, 230)
+    note over U, DB: Upload - the only path that goes through the application
+    U->>ALB: POST /upload  (file + description)
+    ALB->>App: :8080
+    App->>App: reject if empty, over 10 MB,<br/>or description not 1-1000 chars
+    App->>App: read magic bytes:<br/>JPEG, PNG, GIF or WebP, else reject
+    App->>S3: PutObject images/{uuid}{ext}<br/>content type from the detected format
+    App->>DB: insert object key + description
+    App-->>U: 302 redirect to /
+    end
+
+    rect rgb(232, 244, 250)
+    note over U, CF: View - the application never touches S3
+    U->>ALB: GET /
+    ALB->>App: :8080
+    App->>DB: select all, newest first
+    App-->>U: HTML listing https://{cdn}/images/... URLs
+    U->>CF: GET each image
+    CF->>S3: signed read via Origin Access Control
+    CF-->>U: image bytes, cached at the edge
+    end
+```
+
+Two consequences worth knowing:
+
+- **The container never streams image bytes back.** Adding photos does not add
+  egress or CPU load to the tasks, so the service scales on upload traffic
+  rather than on how many people are browsing.
+- **The bucket is unreachable directly.** All public access is blocked and the
+  policy names the distribution, so an object URL returns `200` through
+  CloudFront and `403` straight from S3.
+
+### Upload validation
+
+An upload has to clear four gates before anything is written:
+
+| Gate | Rule |
+| --- | --- |
+| Not empty | `file.isEmpty()` is rejected up front |
+| Size | 1 byte to 10 MB, enforced in the service and by the multipart limit |
+| Description | Trimmed, 1 to 1000 characters |
+| Real image | Leading bytes must match JPEG, PNG, GIF or WebP |
+
+The stored extension and `Content-Type` come from the **detected** format, not
+from the filename the browser supplied, so a `.jpg` that is really something
+else is rejected rather than stored and served back with a misleading type.
+Objects are written with `Content-Disposition: inline`.
 
 ## Configuration
 
