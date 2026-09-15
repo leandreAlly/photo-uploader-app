@@ -31,7 +31,6 @@ public class Photo {
     private Instant createdAt = Instant.now();
 
     protected Photo() {
-        // for JPA and checking
     }
 
     public Photo(String objectKey, String description) {
